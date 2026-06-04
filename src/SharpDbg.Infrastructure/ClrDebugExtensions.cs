@@ -115,6 +115,15 @@ public static class ClrDebugExtensions
 		//while (true) Thread.Sleep(1);
 	}
 
+	// .NET Framework (desktop CLR) attach: CoreCLR's dbgshim can't enumerate the
+	// desktop runtime, so create ICorDebug via the legacy CLRMetaHost shim instead.
+	public static CorDebug Desktop(string version = "v4.0.30319")
+	{
+		return Extensions.CLRCreateInstance().CLRMetaHost
+			.GetRuntime(version)
+			.GetInterface().CorDebug; // CLSID_CLRDebuggingLegacy
+	}
+
 	private static void InitCorDebug(CorDebug cordebug, int pid)
 	{
 		cordebug.Initialize();

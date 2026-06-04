@@ -238,9 +238,11 @@ public class DebugAdapter : DebugAdapterBase
 			throw new ProtocolException("Missing process ID");
 		}
 		var justMyCode = GetConfigValue<bool?>(arguments.ConfigurationProperties, "justMyCode") ?? true;
+		// .NET Framework targets need the legacy desktop-CLR creation path.
+		var useDesktopClr = GetConfigValue<bool?>(arguments.ConfigurationProperties, "useDesktopClr") ?? false;
 		try
 		{
-			_debugger.Attach(processId.Value, justMyCode);
+			_debugger.Attach(processId.Value, justMyCode, useDesktopClr);
 			return new AttachResponse();
 		}
 		catch (Exception ex)

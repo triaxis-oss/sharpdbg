@@ -23,6 +23,7 @@ public partial class ManagedDebugger
 	private bool _isAttached;
 	private int? _pendingAttachProcessId;
 	private bool _justMyCode;
+	private bool _useDesktopClr;
 	private AsyncStepper? _asyncStepper;
 	private CompiledExpressionInterpreter _expressionInterpreter = null!;
 
@@ -77,13 +78,21 @@ public partial class ManagedDebugger
 	/// </summary>
 	private void PerformAttach(int processId)
 	{
-		_logger?.Invoke($"Attaching to process: {processId}");
+		_logger?.Invoke($"Attaching to process: {processId} ({(_useDesktopClr ? "desktop CLR" : "CoreCLR")})");
 
-		// Initialize the debugger
-		var dbgshim = new DbgShim(NativeLibrary.Load("dbgshim", typeof(ManagedDebugger).Assembly, null));
 		_ = Task.Run(() =>
 		{
-			_corDebug = ClrDebugExtensions.Automatic(dbgshim, processId);
+			if (_useDesktopClr)
+			{
+				// .NET Framework: dbgshim can't see the desktop runtime; use the legacy shim.
+				_corDebug = ClrDebugExtensions.Desktop();
+			}
+			else
+			{
+				var dbgshim = new DbgShim(NativeLibrary.Load("dbgshim", typeof(ManagedDebugger).Assembly, null));
+				_corDebug = ClrDebugExtensions.Automatic(dbgshim, processId);
+			}
+
 			_corDebug.Initialize();
 			_corDebug.SetManagedHandler(_callbacks);
 
