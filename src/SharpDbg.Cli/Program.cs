@@ -1,37 +1,21 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Threading;
 using SharpDbg.Application;
 
 namespace SharpDbg.Cli;
 
-class Program
+internal static class Program
 {
 	private static StreamWriter? _logWriter;
 
-	static async Task<int> Main(string[] args)
+	public static int Main(string[] args)
 	{
-		var interpreter = "vscode";
-		var serverPort = -1;
-		string? logPath = null;
+		var (interpreter, serverPort, logPath, requestedHelp) = Arguments.Parse(args);
 
-		// Parse command line arguments
-		for (int i = 0; i < args.Length; i++)
+		if (interpreter is null || requestedHelp)
 		{
-			if (args[i].StartsWith("--interpreter="))
-			{
-				interpreter = args[i].Substring("--interpreter=".Length);
-			}
-			else if (args[i].StartsWith("--server="))
-			{
-				if (int.TryParse(args[i].Substring("--server=".Length), out var port))
-				{
-					serverPort = port;
-				}
-			}
-			else if (args[i].StartsWith("--engineLogging="))
-			{
-				logPath = args[i].Substring("--engineLogging=".Length);
-			}
+			Console.WriteLine(HelpText.Text);
+			return 0;
 		}
 
 		//logPath = @"C:\Users\Matthew\Downloads\sharpdbglogs\log.txt";
@@ -107,7 +91,7 @@ class Program
 
 	private static void Log(string message)
 	{
-		if (_logWriter != null)
+		if (_logWriter is not null)
 		{
 			_logWriter.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}");
 		}

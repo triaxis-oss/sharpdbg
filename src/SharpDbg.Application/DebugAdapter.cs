@@ -4,7 +4,8 @@ using Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages;
 // Newtonsoft.Json.Linq is required for accessing ConfigurationProperties from LaunchArguments/AttachArguments
 // The Microsoft DAP library uses JToken for dynamic configuration properties
 using Newtonsoft.Json.Linq;
-using SharpDbg.Infrastructure.Debugger.ResponseModels;
+using SharpDbg.Infrastructure.Debugger.Models;
+using SharpDbg.Infrastructure.Debugger.Models.Response;
 using MSBreakpoint = Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages.Breakpoint;
 using MSThread = Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages.Thread;
 using MSStackFrame = Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages.StackFrame;
@@ -54,7 +55,7 @@ public class DebugAdapter : DebugAdapterBase
 	// Helper method to extract configuration properties from LaunchArguments/AttachArguments
 	private static T? GetConfigValue<T>(Dictionary<string, JToken>? config, string key)
 	{
-		if (config != null && config.TryGetValue(key, out var token))
+		if (config?.TryGetValue(key, out var token) is true)
 		{
 			return token.ToObject<T>();
 		}
@@ -89,7 +90,7 @@ public class DebugAdapter : DebugAdapterBase
 			Protocol.SendEvent(stoppedEvent);
 		};
 
-        _debugger.OnBreakpointChanged += breakpoint =>
+		_debugger.OnBreakpointChanged += breakpoint =>
 		{
 			Protocol.SendEvent(new BreakpointEvent
 			{
@@ -99,7 +100,9 @@ public class DebugAdapter : DebugAdapterBase
 					Id = breakpoint.Id,
 					Verified = breakpoint.Verified,
 					Line = ConvertDebuggerLineToClient(breakpoint.Line),
+					Column = breakpoint is { Verified: true, Column: not null } ? ConvertDebuggerColumnToClient(breakpoint.Column.Value) : null,
 					EndLine = breakpoint.Verified ? breakpoint.EndLine : null,
+					EndColumn = breakpoint is { Verified: true, EndColumn: not null } ? ConvertDebuggerColumnToClient(breakpoint.EndColumn.Value) : null,
 					Offset = breakpoint.Verified ? 0 : null,
 					Message = breakpoint.Message,
 					Source = breakpoint.Verified is false ? null : new Source
@@ -174,6 +177,28 @@ public class DebugAdapter : DebugAdapterBase
 				Output = output
 			});
 		};
+		_debugger.SendRunInTerminalRequest += launchInfo =>
+		{
+			var runInTerminalRequest = new RunInTerminalRequest
+			{
+				Kind = launchInfo.LaunchRequestConsoleType switch
+				{
+					LaunchRequestConsoleType.IntegratedTerminal => RunInTerminalArguments.KindValue.Integrated,
+					LaunchRequestConsoleType.ExternalTerminal => RunInTerminalArguments.KindValue.External,
+					_ => throw new ArgumentOutOfRangeException(nameof(launchInfo.LaunchRequestConsoleType), $"Invalid LaunchRequestConsoleType for RunInTerminalRequest: '{launchInfo.LaunchRequestConsoleType}'")
+				},
+				Arguments = ["dotnet", launchInfo.Program, ..launchInfo.Arguments],
+				Cwd = launchInfo.Cwd,
+				Env = launchInfo.Env.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value),
+				Title = $"{Path.GetFileName(launchInfo.Program)} [DEBUG]"
+			};
+			runInTerminalRequest.Env["DOTNET_DefaultDiagnosticPortSuspend"] = "1";
+			var resp = Protocol.SendClientRequestSync(runInTerminalRequest);
+			// https://github.com/microsoft/vscode/issues/61640 - ProcessId will not be returned for integratedTerminal or externalTerminal
+			// ShellProcessId will be returned for integratedTerminal but not externalTerminal
+			if (resp.ProcessId is null) throw new InvalidOperationException("RunInTerminalRequest did not return a process ID. VSCode does not return a process ID for integratedTerminal or externalTerminal. Use internalConsole instead, or use a compliant DAP client. See: https://github.com/microsoft/vscode/issues/61640");
+			return resp.ProcessId.Value;
+		};
 	}
 
 	// Command handlers
@@ -207,33 +232,54 @@ public class DebugAdapter : DebugAdapterBase
 
 	protected override LaunchResponse HandleLaunchRequest(LaunchArguments arguments)
 	{
-		var program = GetConfigValue<string>(arguments.ConfigurationProperties, "program");
-		if (string.IsNullOrEmpty(program))
+		return ExecuteWithExceptionHandling(() =>
 		{
-			throw new ProtocolException("Missing program path");
-		}
+			var program = GetConfigValue<string>(arguments.ConfigurationProperties, "program");
+			if (string.IsNullOrEmpty(program))
+			{
+				throw new ProtocolException("Missing program path");
+			}
 
-		var args = GetConfigValue<string[]>(arguments.ConfigurationProperties, "args") ?? [];
-		var cwd = GetConfigValue<string>(arguments.ConfigurationProperties, "cwd");
-		var env = GetConfigValue<Dictionary<string, string>>(arguments.ConfigurationProperties, "env");
-		var stopAtEntry = GetConfigValue<bool?>(arguments.ConfigurationProperties, "stopAtEntry") ?? false;
+			var args = GetConfigValue<List<string>>(arguments.ConfigurationProperties, "args") ?? [];
+			var cwd = GetConfigValue<string>(arguments.ConfigurationProperties, "cwd");
+			var env = GetConfigValue<Dictionary<string, string>>(arguments.ConfigurationProperties, "env") ?? [];
+			var stopAtEntry = GetConfigValue<bool?>(arguments.ConfigurationProperties, "stopAtEntry") ?? false;
+			var console = GetConfigValue<string>(arguments.ConfigurationProperties, "console");
+			var launchRequestConsoleType = console switch
+			{
+				"integratedTerminal" => LaunchRequestConsoleType.IntegratedTerminal,
+				"externalTerminal" => LaunchRequestConsoleType.ExternalTerminal,
+				"internalConsole" => LaunchRequestConsoleType.InternalConsole,
+				null => LaunchRequestConsoleType.InternalConsole, // Default to internalConsole if not specified
+				_ => throw new ArgumentOutOfRangeException(nameof(console), $"Invalid console type: '{console}'")
+			};
+			var launchInfo = new LaunchInfo
+			{
+				Program = program,
+				Arguments = args,
+				Cwd = cwd,
+				Env = env,
+				StopAtEntry = stopAtEntry,
+				LaunchRequestConsoleType = launchRequestConsoleType
+			};
 
-		try
-		{
-			_debugger.Launch(program, args, cwd, env, stopAtEntry);
-			return new LaunchResponse();
-		}
-		catch (Exception ex)
-		{
-			_logger?.Invoke($"Launch failed: {ex.Message}");
-			throw new ProtocolException($"Failed to launch: {ex.Message}");
-		}
+			try
+			{
+				_debugger.Launch(launchInfo);
+				return new LaunchResponse();
+			}
+			catch (Exception ex)
+			{
+				_logger?.Invoke($"Launch failed: {ex.Message}");
+				throw new ProtocolException($"Failed to launch: {ex.Message}");
+			}
+		});
 	}
 
 	protected override AttachResponse HandleAttachRequest(AttachArguments arguments)
 	{
 		var processId = GetConfigValue<int?>(arguments.ConfigurationProperties, "processId");
-		if (processId == null)
+		if (processId is null)
 		{
 			throw new ProtocolException("Missing process ID");
 		}
@@ -252,21 +298,26 @@ public class DebugAdapter : DebugAdapterBase
 		}
 	}
 
-	protected override ConfigurationDoneResponse HandleConfigurationDoneRequest(ConfigurationDoneArguments arguments)
+	protected override async void HandleConfigurationDoneRequestAsync(IRequestResponder<ConfigurationDoneArguments> responder)
 	{
-		return ExecuteWithExceptionHandling(() =>
+		try
 		{
 			_logger?.Invoke("Configuration done");
-			_debugger.ConfigurationDone();
-			return new ConfigurationDoneResponse();
-		});
+			await _debugger.ConfigurationDone();
+			responder.SetResponse(new ConfigurationDoneResponse());
+		}
+		catch (Exception ex)
+		{
+			_logger?.Invoke($"HandleConfigurationDoneRequestAsync failed: {ex.Message} , {ex}");
+			responder.SetError(new ProtocolException($"ConfigurationDone failed: {ex.Message}", ex));
+		}
 	}
 
 	protected override SetBreakpointsResponse HandleSetBreakpointsRequest(SetBreakpointsArguments arguments)
 	{
 		return ExecuteWithExceptionHandling(() =>
 		{
-			if (arguments.Source?.Path == null)
+			if (arguments.Source?.Path is null)
 			{
 				throw new ProtocolException("Missing source path");
 			}
@@ -275,7 +326,8 @@ public class DebugAdapter : DebugAdapterBase
 				.Select(bp => new SharpDbgBreakpointRequest(
 					ConvertClientLineToDebugger(bp.Line),
 					bp.Condition,
-					bp.HitCondition))
+					bp.HitCondition,
+					bp.Column is null ? null : ConvertClientColumnToDebugger(bp.Column.Value)))
 				.ToArray() ?? [];
 
 			var breakpoints = _debugger.SetBreakpoints(arguments.Source.Path, breakpointRequests);
@@ -285,6 +337,9 @@ public class DebugAdapter : DebugAdapterBase
 				Id = bp.Id,
 				Verified = bp.Verified,
 				Line = ConvertDebuggerLineToClient(bp.Line),
+				Column = bp is { Verified: true, Column: not null } ? ConvertDebuggerColumnToClient(bp.Column.Value) : null,
+				EndLine = bp.Verified ? bp.EndLine : null,
+				EndColumn = bp is { Verified: true, EndColumn: not null } ? ConvertDebuggerColumnToClient(bp.EndColumn.Value) : null,
 				Message = bp.Message,
 				Source = new Source
 				{
@@ -310,10 +365,12 @@ public class DebugAdapter : DebugAdapterBase
 
 	protected override SetExceptionBreakpointsResponse HandleSetExceptionBreakpointsRequest(SetExceptionBreakpointsArguments arguments)
 	{
-		// Exception breakpoints configuration
-		_logger?.Invoke($"Exception breakpoints: {string.Join(", ", arguments?.Filters ?? [])}");
+		return ExecuteWithExceptionHandling(() =>
+		{
+			_logger?.Invoke($"Exception breakpoints: {string.Join(", ", arguments?.Filters ?? [])}");
 
-		return new SetExceptionBreakpointsResponse();
+			return new SetExceptionBreakpointsResponse();
+		});
 	}
 
 	protected override ThreadsResponse HandleThreadsRequest(ThreadsArguments arguments)
@@ -348,8 +405,8 @@ public class DebugAdapter : DebugAdapterBase
 				Line = ConvertDebuggerLineToClient(f.Line),
 				EndLine = ConvertDebuggerLineToClient(f.EndLine),
 				Column = ConvertDebuggerColumnToClient(f.Column),
-				EndColumn =  ConvertDebuggerColumnToClient(f.EndColumn),
-				Source = f.Source != null ? new Source { Path = f.Source } : null
+				EndColumn = ConvertDebuggerColumnToClient(f.EndColumn),
+				Source = f.Source is not null ? new Source { Path = f.Source } : null
 			}).ToList();
 
 			return new StackTraceResponse

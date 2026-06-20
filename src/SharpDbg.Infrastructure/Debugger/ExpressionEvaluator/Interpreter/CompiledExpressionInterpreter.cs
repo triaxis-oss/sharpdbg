@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using ClrDebug;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator.Compiler;
 
@@ -43,7 +43,7 @@ public partial class CompiledExpressionInterpreter(RuntimeAssemblyPrimitiveTypeC
 			return new EvaluationResult
 			{
 				Value = resultValue,
-				Editable = evalStack.First.Value.Editable && (setterData == null || setterData.SetterFunction != null),
+				Editable = evalStack.First.Value.Editable && (setterData is null || setterData.SetterFunction is not null),
 				SetterData = setterData
 			};
 		}

@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Reflection.Metadata;
 using System.Runtime.InteropServices;
 using Ardalis.GuardClauses;
@@ -17,7 +18,8 @@ public partial class ManagedDebugger
 		var (friendlyTypeName, value, valueRequiresDebuggerDisplayEval, debuggerProxyTypeName) = GetValueForCorDebugValue(corDebugValue);
 		if (valueRequiresDebuggerDisplayEval)
 		{
-			var compiledExpression = ExpressionCompiler.Compile($"$\"{value}\"", true);
+			var expressionString = $"$\"{value}\"";
+			var compiledExpression = ExpressionCompiler.Compile(expressionString, true);
 			var thread = _process!.GetThread(threadId.Value);
 			var evalContext = new CompiledExpressionEvaluationContext(thread, threadId, frameStackDepth, corDebugValue);
 			var result = await _expressionInterpreter!.Interpret(compiledExpression, evalContext);
@@ -80,7 +82,11 @@ public partial class ManagedDebugger
 	public static CorDebugValueValueResult Get_CorDebugArrayValue_AsString(CorDebugArrayValue corDebugArrayValue)
 	{
 		var typeName = GetCorDebugTypeFriendlyName(corDebugArrayValue.ExactType);
-		return new(typeName, $"{typeName.AsSpan()[..^2]}[{corDebugArrayValue.Count}]", false, null);
+		var typeNameSpan = typeName.AsSpan();
+		var elementTypeName = typeNameSpan[..typeNameSpan.LastIndexOf('[')];
+		var dimensions = corDebugArrayValue.GetDimensions(corDebugArrayValue.Rank);
+		var value = $"{elementTypeName}[{string.Join(", ", dimensions)}]";
+		return new(typeName, value, false, null);
 	}
 
 	public static CorDebugValueValueResult GetCorDebugBoxValue_Value_AsString(CorDebugBoxValue corDebugBoxValue)
@@ -94,8 +100,8 @@ public partial class ManagedDebugger
 	{
 		var module = corDebugObjectValue.Class.Module;
 		var metaDataImport = module.GetMetaDataInterface().MetaDataImport;
-		var baseTypeName = GetCorDebugTypeFriendlyName(corDebugObjectValue.ExactType.Base);
-		if (baseTypeName == "System.Enum")
+		var baseTypeName = corDebugObjectValue.ExactType.Base is {} baseType ? GetCorDebugTypeFriendlyName(baseType) : null; // ExactType.Base is null when ExactType is System.Object
+		if (baseTypeName is "System.Enum")
 		{
 			var valueFieldDef = metaDataImport.FindField(corDebugObjectValue.Class.Token, "value__", 0, 0);
 			var valueField = corDebugObjectValue.GetFieldValue(corDebugObjectValue.Class.Raw, valueFieldDef);
@@ -119,6 +125,14 @@ public partial class ManagedDebugger
 		if (hasDebuggerDisplayAttribute)
 		{
 			var (debuggerDisplayValue, debuggerDisplayName) = GetCustomAttributeCtorStringArgAndNamedArg(debuggerDisplayAttribute, "Name");
+			if (typeName.StartsWith("<>f__AnonymousType"))
+			{
+				// DebuggerDisplay Name for an anonymous type is e.g. `\{ Id = {Id}, Name = {Name} }`
+				// '\' denotes escaping a bracket for presumably VS's DebuggerDisplay interpreter
+				// Since we are leaning on the similarity of DebuggerDisplay strings to interpolated strings, we need to fix the invalid C# syntax before returning it
+				// e.g. fixed - `{{ Id = {Id}, Name = {Name} }}`
+				debuggerDisplayValue = $$$"""{{{{{debuggerDisplayValue[2..^1]}}}}}"""; // range indexing removes the leading '\{' and trailing '}', which we replace
+			}
 			// I prefer how Rider handles this - instead of overriding the actual name of the variable, just prefix the value with the name
 			if (debuggerDisplayName is not null) debuggerDisplayValue = $"{debuggerDisplayName} = {debuggerDisplayValue}";
 			return new(typeName, debuggerDisplayValue, true, debugProxyTypeName);
@@ -127,8 +141,43 @@ public partial class ManagedDebugger
 		{
 			return new(typeName, "{ToString()}", true, debugProxyTypeName);
 		}
+		if (typeName == "decimal")
+		{
+			// This technically isn't necessary - System.Decimal overrides ToString, which we call below. This might technically be faster? This is how it is implemented in netcoredbg, but they don't handle overridden ToString's
+			var decimalString = GetDecimalValueString(corDebugObjectValue);
+			return new(typeName, decimalString, false, null);
+		}
+		if (TypeOverridesToString(corDebugObjectValue.ExactType))
+		{
+			return new(typeName, "{ToString()}", true, debugProxyTypeName);
+		}
 
 		return new(typeName, $"{{{typeName}}}", false, debugProxyTypeName);
+	}
+
+	/// Returns true if <paramref name="corDebugType"/> or any of its base types (up to but not
+	/// including System.Object / System.ValueType) declares a no-arg "ToString" method directly on itself.
+	private static bool TypeOverridesToString(CorDebugType corDebugType)
+	{
+		var type = corDebugType;
+		while (type is not null)
+		{
+			var cls = type.Class;
+			var module = cls.Module;
+			var metaDataImport = module.GetMetaDataInterface().MetaDataImport;
+			var typeName = metaDataImport.GetTypeDefProps(cls.Token).szTypeDef;
+			if (typeName is "System.Object" or "System.ValueType") return false;
+
+			foreach (var methodToken in metaDataImport.EnumMethods(cls.Token))
+			{
+				var methodProps = metaDataImport.GetMethodProps(methodToken);
+				var methodAttr = methodProps.pdwAttr;
+				if (methodProps.szMethod is "ToString" && methodAttr.IsMdStatic() is false && methodAttr.IsMdVirtual() && methodAttr.IsMdNewSlot() is false && Marshal.ReadByte(methodProps.ppvSigBlob, 1) is var parameterCount && parameterCount is 0)
+					return true;
+			}
+			type = type.Base;
+		}
+		return false;
 	}
 
 	private static CorDebugValue? GetUnderlyingValueOrNullFromNullableStruct(CorDebugObjectValue corDebugObjectValue)
@@ -162,11 +211,15 @@ public partial class ManagedDebugger
 	{
 		var primitiveName = GetFriendlyTypeName(corDebugType.Type);
 		if (primitiveName is not null) return primitiveName;
-		if (corDebugType.Type is CorElementType.SZArray or CorElementType.Array)
+		if (corDebugType.Type is CorElementType.SZArray)
 		{
-			var arrayElementType = corDebugType.FirstTypeParameter;
-			var elementName = GetCorDebugTypeFriendlyName(arrayElementType);
+			var elementName = GetCorDebugTypeFriendlyName(corDebugType.FirstTypeParameter);
 			return $"{elementName}[]";
+		}
+		if (corDebugType.Type is CorElementType.Array)
+		{
+			var elementName = GetCorDebugTypeFriendlyName(corDebugType.FirstTypeParameter);
+			return $"{elementName}[{new string(',', corDebugType.Rank - 1)}]";
 		}
 		var corDebugClass = corDebugType.Class;
 		// The specific CorDebugType may have type parameters, but they could be for its enclosing type (e.g. a class defined inside a generic class)
@@ -228,6 +281,24 @@ public partial class ManagedDebugger
 		{
 			"System.String" => "string",
 			"System.Object" => "object",
+			"System.Decimal" => "decimal",
+
+			// These will be hit in the case that a primitive is boxed, e.g. object myInt = 4;
+			"System.Boolean" => "bool",
+			"System.Byte" => "byte",
+			"System.SByte" => "sbyte",
+			"System.Char" => "char",
+			"System.Int16" => "short",
+			"System.UInt16" => "ushort",
+			"System.Int32" => "int",
+			"System.UInt32" => "uint",
+			"System.Int64" => "long",
+			"System.UInt64" => "ulong",
+			"System.Single" => "float",
+			"System.Double" => "double",
+			"System.IntPtr" => "nint",
+			"System.UIntPtr" => "nuint",
+
 			_ => className
 		};
 		return className;
@@ -245,8 +316,8 @@ public partial class ManagedDebugger
 			{
 				CorElementType.Void => "void",
 				CorElementType.Boolean => Marshal.ReadByte(buffer) != 0 ? "true" : "false",
-				CorElementType.Char => ((char)Marshal.ReadInt16(buffer)).ToString(),
-				CorElementType.I1 => Marshal.ReadByte(buffer).ToString(),
+				CorElementType.Char => Marshal.ReadInt16(buffer) is var v ? $"{v} '{(char)v}'" : throw new UnreachableException(),
+				CorElementType.I1 => ((sbyte)Marshal.ReadByte(buffer)).ToString(),
 				CorElementType.I2 => Marshal.ReadInt16(buffer).ToString(),
 				CorElementType.I4 => Marshal.ReadInt32(buffer).ToString(),
 				CorElementType.I8 => Marshal.ReadInt64(buffer).ToString(),
@@ -283,7 +354,7 @@ public partial class ManagedDebugger
 
 		object? result = elementType switch
 		{
-			CorElementType.I1 => Marshal.ReadByte(ppValue),
+			CorElementType.I1 => (sbyte)Marshal.ReadByte(ppValue),
 			CorElementType.I2 => Marshal.ReadInt16(ppValue),
 			CorElementType.I4 => Marshal.ReadInt32(ppValue),
 			CorElementType.I8 => Marshal.ReadInt64(ppValue),
@@ -303,12 +374,12 @@ public partial class ManagedDebugger
 			CorElementType.Void => "void",
 			CorElementType.Boolean => "bool",
 			CorElementType.Char => "char",
-			CorElementType. I1 => "sbyte",
+			CorElementType.I1 => "sbyte",
 			CorElementType.U1 => "byte",
 			CorElementType.I2 => "short",
 			CorElementType.U2 => "ushort",
 			CorElementType.I4 => "int",
-			CorElementType. U4 => "uint",
+			CorElementType.U4 => "uint",
 			CorElementType.I8 => "long",
 			CorElementType.U8 => "ulong",
 			CorElementType.R4 => "float",

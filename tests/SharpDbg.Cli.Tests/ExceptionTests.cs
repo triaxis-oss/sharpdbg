@@ -1,4 +1,4 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
 using Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages;
 using SharpDbg.Cli.Tests.Helpers;
 
@@ -19,10 +19,10 @@ public class ExceptionTests(ITestOutputHelper testOutputHelper)
 			.WithInitializeRequest()
 			.WithAttachRequest(p2.Id)
 			.WaitForInitializedEvent(initializedEventTcs);
-		debugProtocolHost.SendRequestSync(new SetExceptionBreakpointsRequest { Filters = [], FilterOptions = [new("all"), new ("user-unhandled")]});
+		debugProtocolHost.SendRequestSync(new SetExceptionBreakpointsRequest { Filters = [], FilterOptions = [new("all"), new("user-unhandled")] });
 		var breakpointedFilePath = Path.JoinFromGitRoot("tests", "DebuggableConsoleApp", "Exceptions.cs");
 		debugProtocolHost
-			.WithBreakpointsRequest([21], Path.JoinFromGitRoot("tests", "DebuggableConsoleApp", "Program.cs"))
+			.WithBreakpointsRequest([24], Path.JoinFromGitRoot("tests", "DebuggableConsoleApp", "Program.cs"))
 			.WithBreakpointsRequest([17], breakpointedFilePath)
 			.WithConfigurationDoneRequest()
 			.WithOptionalResumeRuntime(p2.Id, startSuspended);
@@ -30,7 +30,7 @@ public class ExceptionTests(ITestOutputHelper testOutputHelper)
 		var stoppedEvent = await debugProtocolHost.WaitForStoppedEvent(debugEventTcs);
 		var stopInfo = stoppedEvent.ReadStopInfo();
 		stopInfo.filePath.Should().EndWith("Program.cs");
-		stopInfo.line.Should().Be(21);
+		stopInfo.line.Should().Be(24);
 
 		// set 'throwException' to true - we do not want other tests to stop at the 'exception' stop event, only this one
 		debugProtocolHost.WithStackTraceRequest(stoppedEvent.ThreadId!.Value, out var stackTraceResponse);
@@ -53,7 +53,7 @@ public class ExceptionTests(ITestOutputHelper testOutputHelper)
 
 		List<Variable> expectedVariables =
 		[
-			new() { Name = "$exception",  EvaluateName = "$exception",  Value = $$"""System.InvalidOperationException: Test exception{{"\r\n"}}   at DebuggableConsoleApp.Exceptions.Test(Boolean shouldThrow) in {{breakpointedFilePath}}:line 12""", Type = "System.InvalidOperationException", VariablesReference = 4 },
+			new() { Name = "$exception",  EvaluateName = "$exception",  Value = $"System.InvalidOperationException: Test exception{Environment.NewLine}   at DebuggableConsoleApp.Exceptions.Test(Boolean shouldThrow) in {breakpointedFilePath}:line 12", Type = "System.InvalidOperationException", VariablesReference = 4 },
 			new() { Name = "shouldThrow", EvaluateName = "shouldThrow", Value = "true",  Type = "bool" },
 			new() { Name = "test", EvaluateName = "test", Value = "true",  Type = "bool" },
 		];

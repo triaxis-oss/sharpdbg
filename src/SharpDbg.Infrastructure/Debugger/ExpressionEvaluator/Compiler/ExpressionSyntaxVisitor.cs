@@ -82,22 +82,29 @@ public class ExpressionSyntaxVisitor(List<CommandBase> commands, bool isDebugger
 
 				case SyntaxKind.IdentifierName:
 				case SyntaxKind.StringLiteralExpression:
-				case SyntaxKind.InterpolatedStringText:
 					_commands.Add(new OneOperandCommand(nodeSyntaxKind, CurrentScopeFlags.Peek(), node.GetFirstToken().Value ?? throw new ArgumentNullException()));
+					break;
+
+				case SyntaxKind.InterpolatedStringText:
+					var rawValue = (string)(node.GetFirstToken().Value ?? throw new ArgumentNullException());
+					var firstParentToken = node.Parent?.ChildTokens().FirstOrDefault();
+					var unescapedValue = firstParentToken?.IsKind(SyntaxKind.InterpolatedStringStartToken) is true // avoids unescaping in a InterpolatedStringExpression with e.g. InterpolatedSingleLineRawStringStartToken as the first child
+						? rawValue.Replace("{{", "{").Replace("}}", "}")
+						: rawValue;
+					_commands.Add(new OneOperandCommand(nodeSyntaxKind, CurrentScopeFlags.Peek(), unescapedValue));
 					break;
 
 				case SyntaxKind.InterpolatedStringExpression:
 					int? InterpolatedStringContentCount = null;
 					foreach (var child in node.ChildNodes())
 					{
-						if (!child.IsKind(SyntaxKind.InterpolatedStringText) &&
-							!child.IsKind(SyntaxKind.Interpolation))
+						if (!child.IsKind(SyntaxKind.InterpolatedStringText) && !child.IsKind(SyntaxKind.Interpolation))
 							continue;
 
 						InterpolatedStringContentCount ??= 0;
 						InterpolatedStringContentCount++;
 					}
-					if (InterpolatedStringContentCount == null || InterpolatedStringContentCount < 1)
+					if (InterpolatedStringContentCount is null or < 1)
 					{
 						throw new ArgumentOutOfRangeException(nodeSyntaxKind + " must have at least one content element!");
 					}
@@ -112,14 +119,14 @@ public class ExpressionSyntaxVisitor(List<CommandBase> commands, bool isDebugger
 					bool OmittedTypeArg = false;
 					foreach (var child in node.ChildNodes())
 					{
-						if (!Microsoft.CodeAnalysis.CSharpExtensions.IsKind(child, SyntaxKind.TypeArgumentList))
+						if (!child.IsKind(SyntaxKind.TypeArgumentList))
 							continue;
 
 						GenericNameArgs = 0;
 
 						foreach (var ArgumentListChild in child.ChildNodes())
 						{
-							if (Microsoft.CodeAnalysis.CSharpExtensions.IsKind(ArgumentListChild, SyntaxKind.OmittedTypeArgument))
+							if (ArgumentListChild.IsKind(SyntaxKind.OmittedTypeArgument))
 							{
 								OmittedTypeArg = true;
 								break;
@@ -128,16 +135,17 @@ public class ExpressionSyntaxVisitor(List<CommandBase> commands, bool isDebugger
 							GenericNameArgs++;
 						}
 					}
-					if (GenericNameArgs == null || (GenericNameArgs < 1 && !OmittedTypeArg))
+					if (GenericNameArgs is null || (GenericNameArgs < 1 && !OmittedTypeArg))
 					{
 						throw new ArgumentOutOfRangeException(nodeSyntaxKind + " must have at least one type!");
 					}
+
 					_commands.Add(new TwoOperandCommand(nodeSyntaxKind, CurrentScopeFlags.Peek(), node.GetFirstToken().Value ?? throw new ArgumentNullException(), GenericNameArgs));
 					break;
 
 				case SyntaxKind.InvocationExpression:
 /* TODO
-					case SyntaxKind.ObjectCreationExpression:
+				case SyntaxKind.ObjectCreationExpression:
 */
 					// InvocationExpression/ObjectCreationExpression
 					//     \ ArgumentList
@@ -158,7 +166,7 @@ public class ExpressionSyntaxVisitor(List<CommandBase> commands, bool isDebugger
 							ArgsCount++;
 						}
 					}
-					if (ArgsCount == null)
+					if (ArgsCount is null)
 					{
 						throw new ArgumentOutOfRangeException(nodeSyntaxKind + " must have at least one argument!");
 					}
@@ -186,7 +194,7 @@ public class ExpressionSyntaxVisitor(List<CommandBase> commands, bool isDebugger
 							ElementAccessArgs++;
 						}
 					}
-					if (ElementAccessArgs == null)
+					if (ElementAccessArgs is null)
 					{
 						throw new ArgumentOutOfRangeException(nodeSyntaxKind + " must have at least one argument!");
 					}
@@ -256,17 +264,17 @@ public class ExpressionSyntaxVisitor(List<CommandBase> commands, bool isDebugger
 				case SyntaxKind.SimpleAssignmentExpression:
 
 /* TODO
-					case SyntaxKind.AliasQualifiedName:
-					case SyntaxKind.ConditionalExpression:
-					case SyntaxKind.PointerMemberAccessExpression:
-					case SyntaxKind.CastExpression:
-					case SyntaxKind.AsExpression:
-					case SyntaxKind.IsExpression:
-					case SyntaxKind.PreIncrementExpression:
-					case SyntaxKind.PostIncrementExpression:
-					case SyntaxKind.PreDecrementExpression:
-					case SyntaxKind.PostDecrementExpression:
-					case SyntaxKind.TypeOfExpression:
+				case SyntaxKind.AliasQualifiedName:
+				case SyntaxKind.ConditionalExpression:
+				case SyntaxKind.PointerMemberAccessExpression:
+				case SyntaxKind.CastExpression:
+				case SyntaxKind.AsExpression:
+				case SyntaxKind.IsExpression:
+				case SyntaxKind.PreIncrementExpression:
+				case SyntaxKind.PostIncrementExpression:
+				case SyntaxKind.PreDecrementExpression:
+				case SyntaxKind.PostDecrementExpression:
+				case SyntaxKind.TypeOfExpression:
 */
 					_commands.Add(new NoOperandsCommand(nodeSyntaxKind, CurrentScopeFlags.Peek()));
 					break;

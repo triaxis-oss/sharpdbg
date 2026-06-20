@@ -1,39 +1,31 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Ardalis.GuardClauses;
 using ClrDebug;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator.Compiler;
+using SharpDbg.Infrastructure.Debugger.Models;
+using SharpDbg.Infrastructure.Debugger.Models.Response;
 using SharpDbg.Infrastructure.Debugger.PresentationHintModels;
-using SharpDbg.Infrastructure.Debugger.ResponseModels;
 using ZLinq;
 
 namespace SharpDbg.Infrastructure.Debugger;
 
-public record SharpDbgBreakpointRequest(int Line, string? Condition = null, string? HitCondition = null);
+public record SharpDbgBreakpointRequest(int Line, string? Condition = null, string? HitCondition = null, int? Column = null);
 
 public partial class ManagedDebugger
 {
 	// Store launch info for deferred attach in ConfigurationDone
-	private string? _pendingLaunchProgram;
-	private string[]? _pendingLaunchArgs;
-	private string? _pendingLaunchWorkingDirectory;
-	private bool _pendingLaunchStopAtEntry;
+	private LaunchInfo? _pendingLaunchInfo;
 
 	/// <summary>
-	/// Launch a process to debug using DbgShim's CreateProcessForLaunch.
-	/// This properly launches the process suspended and waits for CLR startup.
+	/// Stores the launch request info for use in handling ConfigurationDone
 	/// </summary>
-	public void Launch(string program, string[] args, string? workingDirectory, Dictionary<string, string>? env, bool stopAtEntry)
+	public void Launch(LaunchInfo launchInfo)
 	{
-		_logger?.Invoke($"Launching program: {program} {string.Join(' ', args ?? [])}");
-
-		// Store launch parameters for deferred execution in ConfigurationDone
-		_pendingLaunchProgram = program;
-		_pendingLaunchArgs = args;
-		_pendingLaunchWorkingDirectory = workingDirectory;
-		_pendingLaunchStopAtEntry = stopAtEntry;
+		_logger?.Invoke($"Launching program: {launchInfo.Program} {string.Join(' ', launchInfo.Arguments)}");
+		_pendingLaunchInfo = launchInfo;
 	}
 
 	/// <summary>
@@ -41,26 +33,19 @@ public partial class ManagedDebugger
 	/// </summary>
 	private void PerformLaunch()
 	{
-		if (_pendingLaunchProgram == null)
+		if (_pendingLaunchInfo is null)
 		{
 			_logger?.Invoke("No pending launch to perform");
 			return;
 		}
 
-		var program = _pendingLaunchProgram;
-		var args = _pendingLaunchArgs ?? [];
-		var workingDirectory = _pendingLaunchWorkingDirectory;
-		var stopAtEntry = _pendingLaunchStopAtEntry;
-
-		// Clear pending launch
-		_pendingLaunchProgram = null;
-		_pendingLaunchArgs = null;
-		_pendingLaunchWorkingDirectory = null;
+		var launchInfo = _pendingLaunchInfo;
+		_pendingLaunchInfo = null;
 
 		// Build command line: "program" "arg1" "arg2" ...
 		var commandLine = new StringBuilder();
-		commandLine.Append("dotnet ").Append('"').Append(program).Append('"');
-		foreach (var arg in args)
+		commandLine.Append("dotnet ").Append('"').Append(launchInfo.Program).Append('"');
+		foreach (var arg in launchInfo.Arguments)
 		{
 			commandLine.Append(' ').Append('"').Append(arg.Replace("\"", "\\\"")).Append('"');
 		}
@@ -78,7 +63,7 @@ public partial class ManagedDebugger
 				commandLine.ToString(),
 				bSuspendProcess: true,
 				lpEnvironment: IntPtr.Zero, // TODO: support environment variables
-				lpCurrentDirectory: workingDirectory);
+				lpCurrentDirectory: launchInfo.Cwd);
 		}
 		catch (Exception ex)
 		{
@@ -106,8 +91,8 @@ public partial class ManagedDebugger
 	{
 		_logger?.Invoke($"RemoveBreakpoint: {id}");
 		var bp = _breakpointManager.GetBreakpoint(id);
-		if (bp == null) return false;
-		if (bp.CorBreakpoint != null)
+		if (bp is null) return false;
+		if (bp.CorBreakpoint is not null)
 		{
 			try
 			{
@@ -135,13 +120,19 @@ public partial class ManagedDebugger
 	/// <summary>
 	/// Called when DAP configuration is complete - performs deferred launch or attach
 	/// </summary>
-	public void ConfigurationDone()
+	public async Task ConfigurationDone()
 	{
 		//System.Diagnostics.Debugger.Launch();
 		_logger?.Invoke("ConfigurationDone");
 
-		// If we have a pending launch, perform it
-		if (_pendingLaunchProgram != null)
+		if (_pendingLaunchInfo is { LaunchRequestConsoleType: LaunchRequestConsoleType.ExternalTerminal or LaunchRequestConsoleType.IntegratedTerminal })
+		{
+			var launchedProcessId = await Task.Run(() => SendRunInTerminalRequest.Invoke(_pendingLaunchInfo)); // get off the dispatcher thread
+			_pendingLaunchInfo = null;
+			PerformAttach(launchedProcessId);
+			await DiagnosticClientHelper.DiagnosticClientResumeRuntime(launchedProcessId);
+		}
+		else if (_pendingLaunchInfo is not null) // If we have a pending launch, perform it
 		{
 			PerformLaunch();
 		}
@@ -219,7 +210,7 @@ public partial class ManagedDebugger
 		if (_threads.TryGetValue(threadId, out var thread))
 		{
 			var frame = thread.ActiveFrame;
-			if (frame != null)
+			if (frame is not null)
 			{
 				// Try async stepping first
 				if (_asyncStepper is not null)
@@ -251,7 +242,7 @@ public partial class ManagedDebugger
 		if (_threads.TryGetValue(threadId, out var thread))
 		{
 			var frame = thread.ActiveFrame;
-			if (frame != null)
+			if (frame is not null)
 			{
 				// Try async stepping first
 				if (_asyncStepper is not null)
@@ -268,7 +259,7 @@ public partial class ManagedDebugger
 				}
 
 				var stepper = SetupStepper(thread, AsyncStepper.StepType.StepOut);
-				if (stepper != null)
+				if (stepper is not null)
 				{
 					_variableManager.ClearAndDisposeHandleValues();
 					_process?.Continue(false);
@@ -283,13 +274,13 @@ public partial class ManagedDebugger
 	public List<BreakpointManager.BreakpointInfo> SetBreakpoints(string filePath, SharpDbgBreakpointRequest[] breakpoints)
 	{
 		//System.Diagnostics.Debugger.Launch();
-		_logger?.Invoke($"SetBreakpoints: {filePath}, breakpoints: {string.Join(",", breakpoints.Select(b => $"L{b.Line}" + (b.Condition != null ? $"[{b.Condition}]" : "")))}");
+		_logger?.Invoke($"SetBreakpoints: {filePath}, breakpoints: {string.Join(",", breakpoints.Select(b => $"L{b.Line} {(b.Column is not null ? $"C{b.Column}" : null)} {(b.Condition is not null ? $"[{b.Condition}]" : null)}"))}");
 
 		// Deactivate and clear existing breakpoints for this file
 		var existingBreakpoints = _breakpointManager.GetBreakpointsForFile(filePath);
 		foreach (var bp in existingBreakpoints)
 		{
-			if (bp.CorBreakpoint != null)
+			if (bp.CorBreakpoint is not null)
 			{
 				try
 				{
@@ -307,10 +298,10 @@ public partial class ManagedDebugger
 		var result = new List<BreakpointManager.BreakpointInfo>();
 		foreach (var request in breakpoints)
 		{
-			var bp = _breakpointManager.CreateBreakpoint(filePath, request.Line, request.Condition, request.HitCondition);
+			var bp = _breakpointManager.CreateBreakpoint(filePath, request.Line, request.Column, request.Condition, request.HitCondition);
 
 			// Try to bind the breakpoint if we have a process
-			if (_process != null)
+			if (_process is not null)
 			{
 				TryBindBreakpoint(bp);
 			}
@@ -332,7 +323,7 @@ public partial class ManagedDebugger
 	public List<(int id, string name)> GetThreads()
 	{
 		var result = new List<(int, string)>();
-		if (_process == null) return result;
+		if (_process is null) return result;
 
 		try
 		{
@@ -388,7 +379,7 @@ public partial class ManagedDebugger
 							var ilOffset = ilFrame.IP.pnOffset;
 							var methodToken = function.Token;
 							var sourceInfo = module.SymbolReader.GetSourceLocationForOffset(methodToken, ilOffset);
-							if (sourceInfo != null)
+							if (sourceInfo is not null)
 							{
 								line = sourceInfo.Value.startLine;
 								column = sourceInfo.Value.startColumn;
@@ -403,9 +394,9 @@ public partial class ManagedDebugger
 							Id = frameId,
 							Name = GetFunctionFormattedName(function),
 							Line = line,
-							EndLine =  endLine,
+							EndLine = endLine,
 							Column = column,
-							EndColumn =  endColumn,
+							EndColumn = endColumn,
 							Source = sourceFilePath
 						});
 					}
@@ -439,7 +430,7 @@ public partial class ManagedDebugger
 		if (localVariables.Length is 0 && arguments.Length is 0 && !hasCurrentException) return result;
 
 		// can this just be the same reference?
-		var localsRef = _variableManager.CreateReference(new  VariablesReference(StoredReferenceKind.Scope, null, variablesReference.Value.ThreadId, variablesReference.Value.FrameStackDepth, null));
+		var localsRef = _variableManager.CreateReference(new VariablesReference(StoredReferenceKind.Scope, null, variablesReference.Value.ThreadId, variablesReference.Value.FrameStackDepth, null));
 		result.Add(new ScopeInfo
 		{
 			Name = "Locals",
@@ -552,7 +543,7 @@ public partial class ManagedDebugger
 	public void Terminate()
 	{
 		_logger?.Invoke("Terminate");
-		if (_process != null)
+		if (_process is not null)
 		{
 			try
 			{
@@ -579,7 +570,7 @@ public partial class ManagedDebugger
 		}
 		else
 		{
-			if (_process != null && _isAttached && _process?.TryIsRunning(out var isRunning) is HRESULT.S_OK && isRunning)
+			if (_process is not null && _isAttached && _process?.TryIsRunning(out var isRunning) is HRESULT.S_OK && isRunning)
 			{
 				var hResult = _process.TryStop(0);
 				if (hResult is not (HRESULT.S_OK or HRESULT.CORDBG_E_PROCESS_TERMINATED)) _logger?.Invoke($"Error stopping process during disconnect: {hResult}");

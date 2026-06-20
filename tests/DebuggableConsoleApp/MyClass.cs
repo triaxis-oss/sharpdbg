@@ -1,4 +1,4 @@
-﻿using DebuggableConsoleApp.Namespace1;
+using DebuggableConsoleApp.Namespace1;
 
 namespace DebuggableConsoleApp;
 
@@ -35,16 +35,16 @@ public class MyClass : MyClassBase
 	private int[] _intArray = [2, 3, 5, 7];
 	private static List<int> _staticIntList = [1, 4, 8, 25];
 	private static Dictionary<MyClass2, MyClass> _fieldDictionary = [];
-	private static DateTime _utcNow = DateTime.UtcNow;
-	private static DateTime? _nullableUtcNow = DateTime.UtcNow;
+	private static DateTime _utcNow = new(2026, 6, 13, 7, 18, 38);
+	private static DateTime? _nullableUtcNow = new DateTime(2026, 6, 13, 7, 18, 38);
 	private int _instanceField = 5;
 	private static int _instanceStaticField = 6;
 	public int IntProperty { get; set; } = 10;
 	private ClassWithDebugDisplay _classWithDebugDisplay = new ClassWithDebugDisplay();
 	private ClassWithDebugDisplay2 _classWithDebugDisplay2 = new ClassWithDebugDisplay2();
 	private ClassWithDebugDisplay3 _classWithDebugDisplay3 = new ClassWithDebugDisplay3();
-	private MyClassWithGeneric<int> _myClassWithGeneric = new MyClassWithGeneric<int> { GenericItems = [42], GenericItemsField = [43]};
-	private Dictionary<int, int> _intDictionary = new Dictionary<int, int>() { {5, 50}, {10, 100}, {15, 150} };
+	private MyClassWithGeneric<int> _myClassWithGeneric = new MyClassWithGeneric<int> { GenericItems = [42], GenericItemsField = [43] };
+	private Dictionary<int, int> _intDictionary = new Dictionary<int, int>() { { 5, 50 }, { 10, 100 }, { 15, 150 } };
 	private int Get14() => 14;
 	private int DoubleNumber(int number) => number * 2;
 	private float DoubleNumber(float number) => number * 2;

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using ClrDebug;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator.Compiler;
 
@@ -85,14 +85,14 @@ public partial class CompiledExpressionInterpreter
 		CorDebugValue? objValue;
 		CorDebugType? objType;
 
-		if (entry.CorDebugValue == null && entry.Identifiers.Count == 0)
+		if (entry.CorDebugValue is null && entry.Identifiers.Count == 0)
 		{
 			idsEmpty = true;
 			// We don't know if this is a static or instance method, but it's fine to add "this", as if the method is not
 			// found as an instance method, it will continue and search for static methods
 			entry.Identifiers.Add("this");
 			objValue = await GetFrontStackEntryValue(evalStack);
-			var isStaticMethod = objValue == null;
+			var isStaticMethod = objValue is null;
 			objType = objValue?.ExactType;
 
 			if (!isStaticMethod)
@@ -116,7 +116,7 @@ public partial class CompiledExpressionInterpreter
 
 		objValue = await GetFrontStackEntryValue(evalStack);
 
-		if (objValue != null)
+		if (objValue is not null)
 		{
 			var elemType = objValue.UnwrapDebugValue().Type;
 
@@ -127,7 +127,7 @@ public partial class CompiledExpressionInterpreter
 					? genValue.GetValueAsBytes()
 					: null;
 
-				if (data != null)
+				if (data is not null)
 				{
 					objValue = await CreateValueType(boxedClass, data);
 				}
@@ -140,17 +140,17 @@ public partial class CompiledExpressionInterpreter
 			objType = await GetFrontStackEntryType(evalStack);
 		}
 
-		if (objType == null && objValue == null) throw new InvalidOperationException("Could not resolve target type for method invocation");
+		if (objType is null && objValue is null) throw new InvalidOperationException("Could not resolve target type for method invocation");
 
 		CorDebugFunction? function = null;
 		bool? searchStatic = objType is null;
 
-		if (objType != null)
+		if (objType is not null)
 		{
-			function = await FindMethodOnType(objType, methodName, args, searchStatic.Value, idsEmpty);
+			function = FindMethodOnType(objType, methodName, args, searchStatic.Value, idsEmpty);
 		}
 
-		if (function == null)
+		if (function is null)
 		{
 			throw new InvalidOperationException($"Method '{methodName}' with {args.Length} parameters not found");
 		}
@@ -173,7 +173,7 @@ public partial class CompiledExpressionInterpreter
 			valueArgs.Add(arg!.Raw);
 		}
 
-		if (objType != null)
+		if (objType is not null)
 		{
 			var typeParamsEnum = objType.EnumerateTypeParameters();
 			foreach (var typeParam in typeParamsEnum)
@@ -182,11 +182,11 @@ public partial class CompiledExpressionInterpreter
 			}
 		}
 
-		if (entry.GenericTypeCache != null)
+		if (entry.GenericTypeCache is not null)
 		{
 			for (int i = entry.GenericTypeCache.Count - 1; i >= 0; i--)
 			{
-				if (entry.GenericTypeCache[i] != null)
+				if (entry.GenericTypeCache[i] is not null)
 				{
 					typeArgs.Add(entry.GenericTypeCache[i]!.Raw);
 				}
@@ -204,7 +204,7 @@ public partial class CompiledExpressionInterpreter
 			valueArgs.Count,
 			valueArgs.ToArray());
 
-		if (result == null && _runtimeAssemblyPrimitiveTypeClasses.CorVoidClass != null)
+		if (result is null && _runtimeAssemblyPrimitiveTypeClasses.CorVoidClass is not null)
 		{
 			entry.CorDebugValue = await CreateValueType(_runtimeAssemblyPrimitiveTypeClasses.CorVoidClass, null);
 		}
@@ -215,7 +215,7 @@ public partial class CompiledExpressionInterpreter
 	}
 
 	// TODO: Refactor - this doesn't belong in this class
-	public static async Task<CorDebugFunction?> FindMethodOnType(
+	public static CorDebugFunction? FindMethodOnType(
 		CorDebugType type,
 		string methodName,
 		CorDebugValue[] args,
@@ -248,9 +248,9 @@ public partial class CompiledExpressionInterpreter
 
 		// Walk base types if no matching method was found on this type
 		var baseType = type.Base;
-		if (baseType != null)
+		if (baseType is not null)
 		{
-			return await FindMethodOnType(baseType, methodName, args, searchStatic, idsEmpty);
+			return FindMethodOnType(baseType, methodName, args, searchStatic, idsEmpty);
 		}
 
 		return null;
@@ -258,7 +258,7 @@ public partial class CompiledExpressionInterpreter
 
 	private static bool IsMethodParameterMatch(CorDebugFunction method, CorDebugValue[] args)
 	{
-		var metaDataImport = method. Class.Module.GetMetaDataInterface().MetaDataImport;
+		var metaDataImport = method.Class.Module.GetMetaDataInterface().MetaDataImport;
 
 		// Get the method signature blob
 		var methodProps = metaDataImport.GetMethodProps(method.Token);
@@ -273,7 +273,7 @@ public partial class CompiledExpressionInterpreter
 		// Compare each parameter type
 		for (var i = 0; i < args.Length; i++)
 		{
-			var argType = args[i].ExactType?. Type ??  args[i].Type; // Get the actual type
+			var argType = args[i].ExactType?.Type ?? args[i].Type; // Get the actual type
 
 			if (!IsTypeMatch(parameterTypes[i], argType, args[i]))
 				return false;
@@ -335,7 +335,7 @@ public partial class CompiledExpressionInterpreter
 		};
 
 		byte[]? data = null;
-		if (value != null)
+		if (value is not null)
 		{
 			data = value switch
 			{
@@ -395,7 +395,7 @@ public partial class CompiledExpressionInterpreter
 		foreach (var value in components)
 		{
 			var unwrapped = value.UnwrapDebugValue();
-			if (unwrapped == null || unwrapped is CorDebugReferenceValue { IsNull: true })
+			if (unwrapped is null || unwrapped is CorDebugReferenceValue { IsNull: true })
 			{
 				stringBuilder.Append("null");
 			}
@@ -426,12 +426,12 @@ public partial class CompiledExpressionInterpreter
 				? genValue.GetValueAsBytes()
 				: null;
 
-			if (data != null)
+			if (data is not null)
 			{
 				value = await CreateValueType(boxedClass, data);
 			}
 		}
-		var corDebugFunction = await FindMethodOnType(value.ExactType, "ToString", [], false, true);
+		var corDebugFunction = FindMethodOnType(value.ExactType, "ToString", [], false, true);
 		if (corDebugFunction is null) throw new InvalidOperationException("ToString method not found");
 		var eval = _context.Thread.CreateEval();
 		var result = await eval.CallParameterlessInstanceMethodAsync(_debuggerManagedCallback, _debugger.EvalStatus, corDebugFunction, value);
@@ -541,7 +541,7 @@ public partial class CompiledExpressionInterpreter
 		var entry = evalStack.First!.Value;
 		var size = 0;
 
-		if (entry.CorDebugValue != null)
+		if (entry.CorDebugValue is not null)
 		{
 			var elemType = entry.CorDebugValue.Type;
 			if (elemType == CorElementType.Class)

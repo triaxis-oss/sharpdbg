@@ -1,4 +1,4 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
 using SharpDbg.Cli.Tests.Helpers;
 
 namespace SharpDbg.Cli.Tests;
@@ -8,7 +8,7 @@ public class LambdaStepTests(ITestOutputHelper testOutputHelper)
 	[Fact]
 	public async Task SharpDbgCli_StepRequests_InLambda_Returns_StoppedEventsAtCorrectLocation()
 	{
-		var startSuspended = false;
+		var startSuspended = true;
 		var (debugProtocolHost, initializedEventTcs, debugEventTcs, adapter, p2) = TestHelper.GetRunningDebugProtocolHostInProc(testOutputHelper, startSuspended);
 		using var _ = adapter;
 		using var __ = new ProcessKiller(p2);

@@ -5,6 +5,7 @@ using ClrDebug;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator.Compiler;
 using SharpDbg.Infrastructure.Debugger.ExpressionEvaluator.Interpreter;
+using SharpDbg.Infrastructure.Debugger.Models;
 using ZLinq;
 
 namespace SharpDbg.Infrastructure.Debugger;
@@ -38,6 +39,7 @@ public partial class ManagedDebugger
 	public event Action<string, string, string>? OnModuleLoaded;
 	public event Action<string>? OnOutput;
 	public event Action<BreakpointManager.BreakpointInfo>? OnBreakpointChanged;
+	public event Func<LaunchInfo, int> SendRunInTerminalRequest = null!;
 
 	public EvalStatus EvalStatus { get; }
 
@@ -178,7 +180,7 @@ public partial class ManagedDebugger
 	{
 		try
 		{
-			if (_process == null) return false;
+			if (_process is null) return false;
 
 			// Find a module that contains the source file
 			ModuleInfo? targetModule = null;
@@ -186,18 +188,18 @@ public partial class ManagedDebugger
 
 			foreach (var moduleInfo in _modules.Values)
 			{
-				if (moduleInfo.SymbolReader == null)
+				if (moduleInfo.SymbolReader is null)
 					continue;
 
-				resolved = moduleInfo.SymbolReader.ResolveBreakpoint(bp.FilePath, bp.Line);
-				if (resolved != null)
+				resolved = moduleInfo.SymbolReader.ResolveBreakpoint(bp.FilePath, bp.Line, bp.Column);
+				if (resolved is not null)
 				{
 					targetModule = moduleInfo;
 					break;
 				}
 			}
 
-			if (targetModule == null || resolved is null)
+			if (targetModule is null || resolved is null)
 			{
 				// No module found with symbols for this file
 				bp.Verified = false;
@@ -218,7 +220,9 @@ public partial class ManagedDebugger
 			bp.CorBreakpoint = corBreakpoint;
 			bp.Verified = true;
 			bp.Line = resolved.StartLine;
+			bp.Column = resolved.StartColumn;
 			bp.EndLine = resolved.EndLine;
+			bp.EndColumn = resolved.EndColumn;
 			bp.ResolvedBreakpointFromPdb = resolved;
 			bp.ModuleBaseAddress = targetModule.BaseAddress;
 			bp.Message = null;
@@ -293,7 +297,7 @@ public partial class ManagedDebugger
 		_modules.Clear();
 
 		// Deactivate all breakpoints
-		foreach (var bp in _breakpointManager.GetAllBreakpoints().Where(b => b.CorBreakpoint != null))
+		foreach (var bp in _breakpointManager.GetAllBreakpoints().Where(b => b.CorBreakpoint is not null))
 		{
 			var hResult = bp.CorBreakpoint!.TryActivate(false);
 			if (hResult is HRESULT.CORDBG_E_PROCESS_TERMINATED)

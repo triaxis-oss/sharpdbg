@@ -41,7 +41,7 @@ public partial class ManagedDebugger
 		var corModule = loadModuleCorDebugManagedCallbackEventArgs.Module;
 		var modulePath = corModule.Name;
 		var moduleName = Path.GetFileName(modulePath);
-		var baseAddress = (long) corModule.BaseAddress;
+		var baseAddress = (long)corModule.BaseAddress;
 
 		_logger?.Invoke($"Module loaded: {modulePath} at 0x{baseAddress:X}");
 
@@ -60,7 +60,7 @@ public partial class ManagedDebugger
 			{
 				symbolReader = SymbolReader.TryLoad(modulePath);
 			}
-			if (symbolReader != null)
+			if (symbolReader is not null)
 			{
 				_logger?.Invoke($"  Symbols loaded for {moduleName}");
 			}
@@ -93,7 +93,7 @@ public partial class ManagedDebugger
 		OnModuleLoaded?.Invoke(modulePath, Path.GetFileName(modulePath), modulePath);
 
 		// Try to bind any pending breakpoints now that we have a new module with symbols
-		if (symbolReader != null)
+		if (symbolReader is not null)
 		{
 			TryBindPendingBreakpoints();
 		}
@@ -125,7 +125,7 @@ public partial class ManagedDebugger
 			var corThread = breakpointCorDebugManagedCallbackEventArgs.Thread;
 
 			// Check if async stepper handles this breakpoint
-			if (_asyncStepper != null)
+			if (_asyncStepper is not null)
 			{
 				var (asyncHandled, shouldStop) = await _asyncStepper.TryHandleBreakpoint(corThread, functionBreakpoint);
 				if (asyncHandled)
@@ -183,7 +183,7 @@ public partial class ManagedDebugger
 	private void HandleStepComplete(object? sender, StepCompleteCorDebugManagedCallbackEventArgs stepCompleteEventArgs)
 	{
 		var corThread = stepCompleteEventArgs.Thread;
-		var ilFrame = (CorDebugILFrame) corThread.ActiveFrame;
+		var ilFrame = (CorDebugILFrame)corThread.ActiveFrame;
 		// If we have an active async stepper, it means we would have a breakpoint set up for either yield or resume for the next await statement
 		// We would then have done a regular step over/in/out to get to that breakpoint
 		// Since the step has completed, it means we did not hit the breakpoint, so we can clear the active async step
@@ -230,6 +230,7 @@ public partial class ManagedDebugger
 		}
 
 		var (sourceFilePath, line, column, decompiledSourceInfo) = sourceInfo.Value;
+		//_logger?.Invoke($"StepComplete: method 0x{ilFrame.Function.Token} IL offset {ilFrame.IP.pnOffset}, reason: {stepCompleteEventArgs.Reason}");
 		OnStopped2?.Invoke(corThread.Id, sourceFilePath, line, column, "step", decompiledSourceInfo);
 	}
 

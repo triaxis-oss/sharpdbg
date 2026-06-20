@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages;
 using Newtonsoft.Json.Linq;
 using SharpDbg.Infrastructure.Debugger;
@@ -118,6 +118,7 @@ public static class DebugAdapterProcessHelper
 			Breakpoints = breakpointRequests.Select(s => new SourceBreakpoint
 			{
 				Line = s.Line,
+				Column = s.Column,
 				Condition = s.Condition,
 				HitCondition = s.HitCondition
 			}).ToList()

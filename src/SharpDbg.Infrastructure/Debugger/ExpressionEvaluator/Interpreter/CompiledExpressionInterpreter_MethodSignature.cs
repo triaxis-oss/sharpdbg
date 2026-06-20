@@ -13,7 +13,7 @@ public partial class CompiledExpressionInterpreter
 		{
 			// Create a BlobReader from the signature blob
 			//var blob = new ReadOnlySpan<byte>((void*)ppvSigBlob, pcbSigBlob);
-			var reader = new BlobReader((byte*) ppvSigBlob, pcbSigBlob);
+			var reader = new BlobReader((byte*)ppvSigBlob, pcbSigBlob);
 
 			// Decode the method signature
 			var header = reader.ReadSignatureHeader();
@@ -137,7 +137,7 @@ public partial class CompiledExpressionInterpreter
 		{
 			// Need to compare actual type tokens or class information
 			// You might need to get the class from argValue and compare
-			if (argValue.ExactType != null)
+			if (argValue.ExactType is not null)
 			{
 				// Compare class tokens if available
 				var argClass = argValue.ExactType.Class;

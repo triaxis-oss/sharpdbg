@@ -1,4 +1,4 @@
-﻿
+
 using DebuggableConsoleApp.Lambdas;
 
 namespace DebuggableConsoleApp;
@@ -12,8 +12,11 @@ public static class Program
 		var myLambdaClass = new MyLambdaClass();
 		var myClass = new MyClass();
 		var myAsyncClass = new MyAsyncClass();
+		var myAsyncMethodEvalClass = new AsyncMethodEvalClass();
 		var myClassNoMembers = new MyClassNoMembers();
 		var hitConditionClass = new HitConditionClass();
+		var variablesClass = new VariablesClass();
+		var columnBreakpointClass = new ColumnBreakpointClass();
 		var throwException = false;
 		while (true)
 		{
@@ -22,7 +25,11 @@ public static class Program
 			myClass.MyMethod(13, 6);
 			myClassNoMembers.MyMethod(42);
 			hitConditionClass.Test();
+			variablesClass.Test();
+			columnBreakpointClass.Test();
+			MultilineSwitchInMethodCall.Test();
 			var asyncResult = myAsyncClass.MyMethodAsync(4).GetAwaiter().GetResult();
+			myAsyncMethodEvalClass.Test().GetAwaiter().GetResult();
 			Exceptions.Test(throwException);
 			Thread.Sleep(100);
 			//await Task.Delay(500);

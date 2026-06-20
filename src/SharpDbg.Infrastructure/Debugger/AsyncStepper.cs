@@ -95,7 +95,7 @@ public class AsyncStepper
 			var boolValue = eval.NewBooleanValue(true);
 
 			// Find SetNotificationForWaitCompletion method
-			var function = await CompiledExpressionInterpreter.FindMethodOnType(objectValue.ExactType, "SetNotificationForWaitCompletion", [boolValue], false, false);
+			var function = CompiledExpressionInterpreter.FindMethodOnType(objectValue.ExactType, "SetNotificationForWaitCompletion", [boolValue], false, false);
 			Guard.Against.Null(function);
 
 			// Call builder.SetNotificationForWaitCompletion(true)
@@ -141,7 +141,7 @@ public class AsyncStepper
 				}
 			}
 
-			if (targetModule == null)
+			if (targetModule is null)
 				return false;
 
 			// TODO: This doesn't need to be looked up every time
@@ -185,7 +185,7 @@ public class AsyncStepper
 		try
 		{
 			var frame = thread.ActiveFrame;
-			if (frame == null) return (false, null);
+			if (frame is null) return (false, null);
 
 			var function = frame.Function;
 			var moduleAddress = (long)function.Module.BaseAddress;
@@ -194,19 +194,19 @@ public class AsyncStepper
 			var methodVersion = ilCode.VersionNumber;
 
 			// Check if module has symbols
-			if (!_modules.TryGetValue(moduleAddress, out var moduleInfo) || moduleInfo.SymbolReader == null)
+			if (!_modules.TryGetValue(moduleAddress, out var moduleInfo) || moduleInfo.SymbolReader is null)
 				return (false, null);
 
 			// Check if method has async stepping info
 			var asyncInfo = moduleInfo.SymbolReader.GetAsyncMethodSteppingInfo(methodToken);
-			if (asyncInfo == null) return (false, null);
+			if (asyncInfo is null) return (false, null);
 
 			var ilFrame = frame as CorDebugILFrame;
 
 			// Check if we're at the end of an async method and need step-out behavior
 			if (stepType != StepType.StepOut)
 			{
-				if (ilFrame != null)
+				if (ilFrame is not null)
 				{
 					var ipResult = ilFrame.IP;
 					var currentOffset = ipResult.pnOffset;
@@ -232,7 +232,7 @@ public class AsyncStepper
 				{
 					// For step-out in async method with await, check if we need NotifyDebuggerOfWaitCompletion
 					var builder = ilFrame is not null ? GetAsyncBuilder(ilFrame) : null;
-					if (builder != null)
+					if (builder is not null)
 					{
 						// Check if builder is AsyncVoidMethodBuilder
 						var builderType = ManagedDebugger.GetCorDebugTypeFriendlyName(builder.ExactType);
@@ -261,13 +261,13 @@ public class AsyncStepper
 				}
 
 				// Find next await block after current offset
-				if (ilFrame == null) return (false, null);
+				if (ilFrame is null) return (false, null);
 
 				var ipResult = ilFrame.IP;
 				var currentOffset = ipResult.pnOffset;
 
 				var awaitInfo = FindNextAwaitInfo(asyncInfo, (uint)currentOffset);
-				if (awaitInfo == null)
+				if (awaitInfo is null)
 				{
 					// No more await blocks - use simple stepper
 					return (false, null);
@@ -317,7 +317,7 @@ public class AsyncStepper
 		using (await _lock2.LockAsync())
 		{
 			// Check if it's our NotifyDebuggerOfWaitCompletion breakpoint
-			if (_notifyDebuggerBreakpoint != null &&
+			if (_notifyDebuggerBreakpoint is not null &&
 				MatchesBreakpoint(breakpoint, _notifyDebuggerBreakpoint, thread))
 			{
 				// NotifyDebuggerOfWaitCompletion was hit - this is for step-out
@@ -329,7 +329,7 @@ public class AsyncStepper
 			}
 
 			// Check if we have an active async step
-			if (_currentAsyncStep == null)
+			if (_currentAsyncStep is null)
 				return (false, null);
 
 			// Check if breakpoint matches our async step
@@ -343,7 +343,7 @@ public class AsyncStepper
 
 			// Check if IP matches expected offset
 			var frame = thread.ActiveFrame as CorDebugILFrame;
-			if (frame == null)
+			if (frame is null)
 			{
 				_currentAsyncStep?.Dispose();
 				_currentAsyncStep = null;
@@ -465,7 +465,7 @@ public class AsyncStepper
 	{
 		Guard.Against.Null(frame);
 		var builder = GetAsyncBuilder(frame);
-		if (builder == null) return null;
+		if (builder is null) return null;
 
 		var objectId = await GetObjectIdForDebugger(builder, frame);
 		return objectId;
@@ -493,12 +493,12 @@ public class AsyncStepper
 
 			var thisValue = arguments[0];
 			var thisRefValue = thisValue as CorDebugReferenceValue;
-			if (thisRefValue == null || thisRefValue.IsNull)
+			if (thisRefValue is null || thisRefValue.IsNull)
 				return null;
 
 			var thisValueUnwrapped = thisRefValue.Dereference();
 			var thisObjectValue = thisValueUnwrapped as CorDebugObjectValue;
-			if (thisObjectValue == null)
+			if (thisObjectValue is null)
 				return null;
 
 			var thisClass = thisObjectValue.Class;
@@ -525,7 +525,7 @@ public class AsyncStepper
 		var metadataImport = module.GetMetaDataInterface().MetaDataImport;
 
 		var propertyDef = metadataImport.GetPropertyWithName(@class.Token, "ObjectIdForDebugger");
-		if (propertyDef == null || propertyDef.Value.IsNil)
+		if (propertyDef is null || propertyDef.Value.IsNil)
 			return null;
 
 		var propertyProps = metadataImport.GetPropertyProps(propertyDef.Value);
@@ -554,7 +554,7 @@ public class AsyncStepper
 	private bool MatchesBreakpoint(CorDebugFunctionBreakpoint breakpoint, AsyncBreakpoint asyncBp, CorDebugThread thread)
 	{
 		var frame = thread.ActiveFrame;
-		if (frame == null) return false;
+		if (frame is null) return false;
 
 		var function = frame.Function;
 		var moduleAddress = function.Module.BaseAddress;

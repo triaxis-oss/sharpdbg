@@ -1,4 +1,4 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
 using Microsoft.VisualStudio.Shared.VSCodeDebugProtocol.Messages;
 using SharpDbg.Cli.Tests.Helpers;
 
@@ -9,7 +9,7 @@ public class LambdaVariablesTests(ITestOutputHelper testOutputHelper)
 	[Fact]
 	public async Task SharpDbgCli_InLambda_VariablesRequest_Returns_InScopeVariables()
 	{
-		var startSuspended = false;
+		var startSuspended = true;
 		var (debugProtocolHost, initializedEventTcs, debugEventTcs, adapter, p2) = TestHelper.GetRunningDebugProtocolHostInProc(testOutputHelper, startSuspended);
 		using var _ = adapter;
 		using var __ = new ProcessKiller(p2);
